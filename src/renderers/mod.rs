@@ -7,3 +7,8 @@ pub use raylib::clay_raylib_render;
 pub mod skia;
 #[cfg(feature = "skia-renderer")]
 pub use skia::clay_skia_render;
+
+#[cfg(feature = "macroquad-renderer")]
+pub mod macroquad;
+#[cfg(feature = "macroquad-renderer")]
+pub use macroquad::clay_macroquad_render;
