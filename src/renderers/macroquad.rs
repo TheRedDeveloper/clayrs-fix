@@ -1,9 +1,9 @@
 use macroquad::prelude::*;
-use clay_layout::{math::BoundingBox, render_commands::{CornerRadii, RenderCommand, RenderCommandConfig}};
+use crate::{math::BoundingBox, render_commands::{CornerRadii, RenderCommand, RenderCommandConfig}};
 
 const PIXELS_PER_POINT: f32 = 2.0;
 
-fn clay_to_macroquad_color(clay_color: &clay_layout::color::Color) -> Color {
+fn clay_to_macroquad_color(clay_color: &crate::color::Color) -> Color {
     Color {
         r: clay_color.r / 255.0,
         g: clay_color.g / 255.0,
