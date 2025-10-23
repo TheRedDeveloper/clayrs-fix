@@ -374,7 +374,7 @@ impl Clay {
     ///
     /// This ID is global and must be unique across the entire scope.
     #[inline]
-    pub fn id(&self, label: &str) -> id::Id {
+    pub fn id(&self, label: &'static str) -> id::Id {
         id::Id::new(label)
     }
 
@@ -382,7 +382,7 @@ impl Clay {
     ///
     /// This is useful when multiple elements share the same label but need distinct IDs.
     #[inline]
-    pub fn id_index(&self, label: &str, index: u32) -> id::Id {
+    pub fn id_index(&self, label: &'static str, index: u32) -> id::Id {
         id::Id::new_index(label, index)
     }
 
@@ -390,7 +390,7 @@ impl Clay {
     ///
     /// The ID is unique within a specific local scope but not globally.
     #[inline]
-    pub fn id_local(&self, label: &str) -> id::Id {
+    pub fn id_local(&self, label: &'static str) -> id::Id {
         id::Id::new_index_local(label, 0)
     }
 
@@ -398,7 +398,7 @@ impl Clay {
     ///
     /// This is useful for differentiating elements within a local scope while keeping their labels consistent.
     #[inline]
-    pub fn id_index_local(&self, label: &str, index: u32) -> id::Id {
+    pub fn id_index_local(&self, label: &'static str, index: u32) -> id::Id {
         id::Id::new_index_local(label, index)
     }
 
@@ -591,7 +591,7 @@ impl Drop for Clay {
 impl From<&str> for Clay_String {
     fn from(value: &str) -> Self {
         Self {
-            isStaticallyAllocated: false,
+            isStaticallyAllocated: true,
             length: value.len() as _,
             chars: value.as_ptr() as _,
         }
