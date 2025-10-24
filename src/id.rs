@@ -20,13 +20,13 @@ impl Id {
 
     #[inline]
     pub(crate) fn new_index_internal(label: &str, index: u32) -> Id {
-        let id = unsafe { Clay__HashString(label.into(), index, 0) };
+        let id = unsafe { Clay__HashStringWithOffset(label.into(), index, 0) };
         Id { id }
     }
 
     #[inline]
     pub(crate) fn new_index_local(label: &str, index: u32) -> Id {
-        let id = unsafe { Clay__HashString(label.into(), index, Clay__GetParentElementId()) };
+        let id = unsafe { Clay__HashStringWithOffset(label.into(), index, Clay__GetParentElementId()) };
         Id { id }
     }
 }

@@ -1111,7 +1111,7 @@ unsafe extern "C" {
     pub fn Clay__CloseElement();
 }
 unsafe extern "C" {
-    pub fn Clay__HashString(key: Clay_String, offset: u32, seed: u32) -> Clay_ElementId;
+    pub fn Clay__HashStringWithOffset(key: Clay_String, offset: u32, seed: u32) -> Clay_ElementId;
 }
 unsafe extern "C" {
     pub fn Clay__OpenTextElement(text: Clay_String, textConfig: *mut Clay_TextElementConfig);
