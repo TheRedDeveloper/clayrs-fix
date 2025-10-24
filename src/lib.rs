@@ -393,6 +393,16 @@ impl Clay {
         unsafe { Clay_PointerOver(cfg.id) }
     }
 
+    #[cfg(feature = "std")]
+    /// Z-sorted list of element IDs that the cursor is currently over
+    pub fn pointer_over_ids(&self) -> Vec<Id> {
+        unsafe {
+            let array = Clay_GetPointerOverIds();
+            let slice = core::slice::from_raw_parts(array.internalArray, array.length as _);
+            slice.iter().map(|&id| Id { id }).collect()
+        }
+    }
+
     #[cfg(not(feature = "std"))]
     pub unsafe fn new_with_memory(dimensions: Dimensions, memory: *mut core::ffi::c_void) -> Self {
         let memory_size = Self::required_memory_size();
