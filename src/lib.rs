@@ -39,7 +39,9 @@ impl<'render, ImageElementData: 'render, CustomElementData: 'render>
 {
     #[inline]
     pub fn new() -> Self {
-        crate::mem::zeroed_init()
+        let mut zeroed: Self = crate::mem::zeroed_init();
+        zeroed.id = None; // Zeroed doesn't mean None for Option
+        zeroed
     }
 
     #[inline]
