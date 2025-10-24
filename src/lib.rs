@@ -255,6 +255,34 @@ impl<'render, 'clay: 'render, ImageElementData: 'render, CustomElementData: 'ren
         unsafe { Clay_Hovered() }
     }
 
+    pub fn on_hover<F, T>(&self, callback: F, user_data: T)
+    where
+        F: Fn(Id, Clay_PointerData, &mut T) + 'static
+    {
+        let boxed = Box::new((callback, user_data));
+        let user_data_ptr = Box::into_raw(boxed) as *mut core::ffi::c_void;
+
+        unsafe extern "C" fn trampoline<F, T>(
+            element_id: Clay_ElementId,
+            pointer_data: Clay_PointerData,
+            user_data: *mut core::ffi::c_void,
+        )
+        where
+            F: Fn(Id, Clay_PointerData, &mut T) + 'static,
+        {
+            let (callback, data) = &mut *(user_data as *mut (F, T));
+            let id = Id { id: element_id };
+            callback(id, pointer_data, data);
+        }
+
+        unsafe {
+            Clay_OnHover(
+                Some(trampoline::<F, T>),
+                user_data_ptr,
+            );
+        }
+    }
+
     pub fn scroll_offset(&self) -> Vector2 {
         unsafe { Clay_GetScrollOffset().into() }
     }
