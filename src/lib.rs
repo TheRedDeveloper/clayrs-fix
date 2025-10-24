@@ -515,6 +515,18 @@ impl Clay {
         }
     }
 
+    /// Returns if debug mode is enabled
+    pub fn is_debug_mode(&self) -> bool {
+        unsafe { Clay_IsDebugModeEnabled() }
+    }
+
+    /// Enables or disables culling
+    pub fn set_culling(&self, enable: bool) {
+        unsafe {
+            Clay_SetCullingEnabled(enable);
+        }
+    }
+
     /// Sets the dimensions of the global layout, use if, for example the window size you render to
     /// changed
     pub fn set_layout_dimensions(&self, dimensions: Dimensions) {
