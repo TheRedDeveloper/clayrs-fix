@@ -1,7 +1,15 @@
 use macroquad::prelude::*;
 use crate::{math::BoundingBox, render_commands::{CornerRadii, RenderCommand, RenderCommandConfig}};
 
+#[cfg(feature = "macroquad-text-styling")]
+use crate::renderers::macroquad_text_styling::{parse_text_lines, render_styled_text, StyledSegment};
+#[cfg(feature = "macroquad-text-styling")]
+use std::collections::HashMap;
+
 const PIXELS_PER_POINT: f32 = 2.0;
+
+#[cfg(feature = "macroquad-text-styling")]
+static ANIMATION_TRACKER: std::sync::LazyLock<std::sync::Mutex<HashMap<String, (usize, f64)>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 fn clay_to_macroquad_color(clay_color: &crate::color::Color) -> Color {
     Color {
@@ -140,8 +148,213 @@ pub fn clay_macroquad_render<'a, CustomElementData: 'a>(
         }
         render_target.texture
     }
+
+    #[cfg(feature = "macroquad-text-styling")]
+    let mut style_stack: Vec<String> = Vec::new();
+    #[cfg(feature = "macroquad-text-styling")]
+    let mut total_char_index = 0;
+    
     for command in commands {
         match &command.config {
+            #[cfg(feature = "macroquad-text-styling")]
+            RenderCommandConfig::Text(config) => {
+                use crate::renderers::macroquad_text_styling::StyledSegment;
+
+                let bb = command.bounding_box;
+                let font_size = config.font_size as f32;
+                let font = Some(&fonts[config.font_id as usize]);
+                let default_color = clay_to_macroquad_color(&config.color);
+
+                let normal_render = || {
+                    let x_scale = if config.letter_spacing > 0 {
+                        bb.width / measure_text(
+                            config.text,
+                            font,
+                            config.font_size as u16,
+                            1.0
+                        ).width
+                    } else {
+                        1.0
+                    };
+                    draw_text_ex(
+                        config.text,
+                        bb.x,
+                        bb.y + bb.height,
+                        TextParams {
+                            font_size: config.font_size as u16,
+                            font,
+                            font_scale: 1.0,
+                            font_scale_aspect: x_scale,
+                            rotation: 0.0,
+                            color: default_color
+                        }
+                    );
+                };
+                
+                let mut in_style_def = false;
+                let mut escaped = false;
+                let mut failed = false;
+                
+                let mut text_buffer = String::new();
+                let mut style_buffer = String::new();
+
+                let line = config.text.to_string();
+                let mut segments: Vec<StyledSegment> = Vec::new();
+
+                for c in line.chars() {
+                    if escaped {
+                        if in_style_def {
+                            style_buffer.push(c);
+                        } else {
+                            text_buffer.push(c);
+                        }
+                        escaped = false;
+                        continue;
+                    }
+
+                    match c {
+                        '\\' => {
+                            escaped = true;
+                        }
+                        '{' => {
+                            if in_style_def {
+                                style_buffer.push(c); 
+                            } else {
+                                if !text_buffer.is_empty() {
+                                    segments.push(StyledSegment {
+                                        text: text_buffer.clone(),
+                                        styles: style_stack.clone(),
+                                    });
+                                    text_buffer.clear();
+                                }
+                                in_style_def = true;
+                            }
+                        }
+                        '|' => {
+                            if in_style_def {
+                                style_stack.push(style_buffer.clone());
+                                style_buffer.clear();
+                                in_style_def = false;
+                            } else {
+                                text_buffer.push(c);
+                            }
+                        }
+                        '}' => {
+                            if in_style_def {
+                                style_buffer.push(c);
+                            } else {
+                                if !text_buffer.is_empty() {
+                                    segments.push(StyledSegment {
+                                        text: text_buffer.clone(),
+                                        styles: style_stack.clone(),
+                                    });
+                                    text_buffer.clear();
+                                }
+                                
+                                if style_stack.pop().is_none() {
+                                    failed = true;
+                                    break;
+                                }
+                            }
+                        }
+                        _ => {
+                            if in_style_def {
+                                style_buffer.push(c);
+                            } else {
+                                text_buffer.push(c);
+                            }
+                        }
+                    }
+                }
+                if !(failed || in_style_def) {
+                    if !text_buffer.is_empty() {
+                        segments.push(StyledSegment {
+                            text: text_buffer.clone(),
+                            styles: style_stack.clone(),
+                        });
+                    }
+                    
+                    let time = get_time();
+                    
+                    let cursor_x = std::cell::Cell::new(bb.x);
+                    let cursor_y = bb.y + bb.height;
+                    let mut pending_renders = Vec::new();
+                    
+                    let x_scale = if config.letter_spacing > 0 {
+                        bb.width / measure_text(
+                            config.text,
+                            Some(&fonts[config.font_id as usize]),
+                            config.font_size as u16,
+                            1.0
+                        ).width
+                    } else {
+                        1.0
+                    };
+                    {
+                        let mut tracker = ANIMATION_TRACKER.lock().unwrap();
+                        render_styled_text(
+                            &segments,
+                            time,
+                            font_size,
+                            &mut *tracker,
+                            &mut total_char_index,
+                            |text, tr, style_color| {
+                                let text_string = text.to_string();
+                                let text_width = measure_text(&text_string, font, config.font_size as u16, 1.0).width;
+                                
+                                let color = Color::new(style_color.r, style_color.g, style_color.b, style_color.a);
+                                let x = cursor_x.get();
+                                
+                                pending_renders.push((x, text_string, tr, color));
+                                
+                                cursor_x.set(x + text_width*x_scale);
+                            },
+                            |text, tr, style_color| {
+                                let text_string = text.to_string();
+                                let color = Color::new(style_color.r, style_color.g, style_color.b, style_color.a);
+                                let x = cursor_x.get();
+                                
+                                draw_text_ex(
+                                    &text_string,
+                                    x + tr.x*x_scale,
+                                    cursor_y + tr.y,
+                                    TextParams {
+                                        font_size: config.font_size as u16,
+                                        font,
+                                        font_scale: tr.scale_y.max(0.01),
+                                        font_scale_aspect: if tr.scale_y > 0.01 { tr.scale_x / tr.scale_y * x_scale } else { x_scale },
+                                        rotation: tr.rotation.to_radians(),
+                                        color
+                                    }
+                                );
+                            }
+                        );
+                    }
+                    for (x, text_string, tr, color) in pending_renders {
+                        draw_text_ex(
+                            &text_string,
+                            x + tr.x*x_scale,
+                            cursor_y + tr.y,
+                            TextParams {
+                                font_size: config.font_size as u16,
+                                font,
+                                font_scale: tr.scale_y.max(0.01),
+                                font_scale_aspect: if tr.scale_y > 0.01 { tr.scale_x / tr.scale_y * x_scale } else { x_scale },
+                                rotation: tr.rotation.to_radians(),
+                                color
+                            }
+                        );
+                    }
+                } else {
+                    if in_style_def {
+                        warn!("Style definition didn't end! Here is what we tried to render: {}", config.text);
+                    } else if failed {
+                        warn!("Encountered }} without opened style! Make sure to escape curly braces with \\. Here is what we tried to render: {}", config.text);
+                    }
+                    normal_render();
+                }
+            }
+            #[cfg(not(feature = "macroquad-text-styling"))]
             RenderCommandConfig::Text(config) => {
                 let bb = command.bounding_box;
                 let color = clay_to_macroquad_color(&config.color);
@@ -496,5 +709,63 @@ pub fn clay_macroquad_render<'a, CustomElementData: 'a>(
             }
             RenderCommandConfig::None() => {}
         }
+    }
+}
+
+pub fn create_measure_text_function(
+    fonts: Vec<Font>,
+) -> impl Fn(&str, &crate::TextConfig) -> crate::Dimensions + 'static {
+    move |text: &str, config: &crate::TextConfig| {
+        #[cfg(feature = "macroquad-text-styling")]
+        let cleaned_text = {
+            // Remove macroquad_text_styling tags, handling escapes
+            let mut result = String::new();
+            let mut in_style_def = false;
+            let mut escaped = false;
+            for c in text.chars() {
+                if escaped {
+                    result.push(c);
+                    escaped = false;
+                    continue;
+                }
+                match c {
+                    '\\' => {
+                        escaped = true;
+                    }
+                    '{' => {
+                        in_style_def = true;
+                    }
+                    '|' => {
+                        if in_style_def {
+                            in_style_def = false;
+                        } else {
+                            result.push(c);
+                        }
+                    }
+                    '}' => {
+                        // Nothing
+                    }
+                    _ => {
+                        if !in_style_def {
+                            result.push(c);
+                        }
+                    }
+                }
+            }
+            if in_style_def {
+                panic!("Ended inside a style definition while cleaning text for measurement! Make sure to escape curly braces with \\. Here is what we tried to measure: {}", text);
+            }
+            result
+        };
+        #[cfg(not(feature = "macroquad-text-styling"))]
+        let cleaned_text = text.to_string();
+        let measured = macroquad::text::measure_text(
+            &cleaned_text,
+            Some(&fonts[config.font_id as usize]),
+            config.font_size,
+            1.0,
+        );
+        let added_space = (text.chars().count().max(1) - 1) as f32 * config.letter_spacing as f32;
+        crate::Dimensions::new(measured.width + added_space, measured.height)
     }
 }
