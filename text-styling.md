@@ -109,11 +109,13 @@ Renders a duplicate character behind the text.
 * `scale=X,Y`: Shadow size multiplier. **Def:** 1.0
 
 **gradient**
+
 Cycles colors across the text.
 * `stops=POS:COLOR,POS:COLOR...`: List of anchor points. Positions are character indices. **Def:** Rainbow
 * `speed=FLOAT`: Speed in chars/sec. **Def:** 1
 
 **hide**
+
 Prevents the text from rendering completely.
 * No parameters.
 
