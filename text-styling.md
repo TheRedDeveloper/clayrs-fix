@@ -13,14 +13,17 @@ Styles are applied using tags enclosed in `{` and `|` and closed with `}`.
 
 ## Categories
 
-**1. Properties**
-Static attributes applied to the text block. These set specific values like **color** or **transparency**.
+**Properties**
 
-**2. Effects**
+Static attributes applied to the text block. These set specific values like **color** or **opacity**.
+
+**Effects**
+
 Effects applied **individually to each character**. These create movement or visual effects.
 
-**3. Animations**
-**Time-based transitions** (entry or exit) tracked via a unique `id`. These modify the visibility or transform over time.
+**Animations**
+
+Time-based transitions (entry or exit) tracked via a unique `id`. These cause text to appear or disappear.
 
 ---
 
@@ -46,11 +49,13 @@ When multiple tags are active, they are processed in this strict order:
 ## Properties Reference
 
 **color**
+
 Sets the fill color of the text.
 * **Parameter:** `color=VALUE` (Hex code `#RRGGBB`, `(r,g,b)`, or named color)
-* **Supported Names:** White, Black, LightGray, DarkGray, Red, Orange, Yellow, Lime, Green, Cyan, LightBlue, Blue, Purple, Magenta, Brown, Pink
+* **Supported Names:** White, Black, LightGray, DarkGray, Red, Orange, Yellow, Lime, Green, Cyan, LightBlue, Blue, Purple, Magenta, Brown, Pink. Case insensitive.
 
 **opacity**
+
 Sets the transparency of the text.
 * **Parameter:** `opacity=FLOAT` (0.0 to 1.0)
 
@@ -59,12 +64,14 @@ Sets the transparency of the text.
 ## Effects Reference
 
 **transform**
+
 Applies static geometric transformations to characters.
 * `translate=X,Y`: Pixel offset ratio relative to font size. **Def:** 0,0
 * `scale=X,Y`: Size multiplier. One value applies to both axes. **Def:** 1.0
 * `rotate=DEGREES`: Clockwise rotation. **Def:** 0
 
 **wave**
+
 Vertical sine wave movement.
 * `w=FLOAT`: Wavelength in characters. **Def:** 3
 * `f=FLOAT` **OR** `s=FLOAT`: Frequency (bobs/sec) or Speed (chars/sec). **Def:** f=0.5
@@ -73,6 +80,7 @@ Vertical sine wave movement.
 * `r=FLOAT`: Rotation of the movement vector in degrees. **Def:** 0
 
 **swing**
+
 Rotational sine wave (pendulum motion).
 * `w=FLOAT`: Wavelength in characters. **Def:** 3
 * `f=FLOAT` **OR** `s=FLOAT`: Frequency (swings/sec) or Speed (chars/sec). **Def:** f=0.5
@@ -80,6 +88,7 @@ Rotational sine wave (pendulum motion).
 * `p=FLOAT`: Phase offset (0-1). **Def:** 0
 
 **pulse**
+
 Sine wave scaling (growing and shrinking).
 * `w=FLOAT`: Wavelength in characters. **Def:** 2
 * `f=FLOAT` **OR** `s=FLOAT`: Frequency (cycles/sec) or Speed (chars/sec). **Def:** f=0.6
@@ -87,11 +96,13 @@ Sine wave scaling (growing and shrinking).
 * `p=FLOAT`: Phase offset (0-1). **Def:** 0
 
 **jitter**
+
 Randomized character offset within an ellipse.
 * `radii=X,Y`: Maximum offset distance (ratio to font size). **Def:** 0.5,0.5
 * `rotation=DEGREES`: Rotation of the jitter ellipse.
 
 **shadow**
+
 Renders a duplicate character behind the text.
 * `color=COLOR`: Shadow color. **Def:** Black
 * `offset=X,Y`: Pixel offset ratio. **Def:** -0.3,0.3
@@ -112,13 +123,15 @@ Prevents the text from rendering completely.
 *All animations require a unique `id` parameter.*
 
 **type**
+
 Typing writer effect. Characters appear sequentially.
 * `MODE`: `in` or `out`.
 * `id=WORD`: Unique tracking identifier.
 * `speed=FLOAT`: Characters per second. **Def:** 8
-Example: `{type_in_id=foo|Text to type}
+Example: `{type_in_id=foo|Text to type}`
 
 **fade**
+
 Opacity transition.
 * `MODE`: `in` or `out`.
 * `id=WORD`: Unique tracking identifier.
@@ -127,6 +140,7 @@ Opacity transition.
 Example: `{fade_out_id=bar_speed=5|Fade this text out quickly}`
 
 **scale**
+
 Size transition (pop-in/pop-out).
 * `MODE`: `in` or `out`.
 * `id=WORD`: Unique tracking identifier.
