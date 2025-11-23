@@ -753,7 +753,7 @@ pub fn create_measure_text_function(
                 }
             }
             if in_style_def {
-                panic!("Ended inside a style definition while cleaning text for measurement! Make sure to escape curly braces with \\. Here is what we tried to measure: {}", text);
+                warn!("Ended inside a style definition while cleaning text for measurement! Make sure to escape curly braces with \\. Here is what we tried to measure: {}", text);
             }
             result
         };
