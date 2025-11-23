@@ -100,8 +100,15 @@ pub fn parse_text_lines(lines: Vec<String>) -> Result<Vec<Vec<StyledSegment>>, S
                         }
                         
                         if style_stack.pop().is_none() {
-                            return Err("Error: '}' found with no open style.".to_string());
+                            return Err(format!("Error: '}}' found with no open style on this line: {}", line));
                         }
+                    }
+                }
+                ' ' => {
+                    if in_style_def {
+                        return Err(format!("Error: Whitespace not allowed in style definition on this line: {}", line));
+                    } else {
+                        text_buffer.push(c);
                     }
                 }
                 _ => {
@@ -183,8 +190,7 @@ pub fn render_styled_text<F1, F2>(
     for segment in segments {
         let mut has_effects = false;
         for style_str in &segment.styles {
-            let style_str = style_str.replace('_', " ");
-            let mut parts = style_str.split_whitespace();
+            let mut parts = style_str.split('_');
             let first_part = parts.next().unwrap_or("");
             let (cmd, _) = if let Some(idx) = first_part.find('=') {
                 (&first_part[..idx], Some(&first_part[idx+1..]))
@@ -202,7 +208,7 @@ pub fn render_styled_text<F1, F2>(
             let mut opacity_mult = 1.0;
             
             for style_str in &segment.styles {
-                let mut parts = style_str.split_whitespace();
+                let mut parts = style_str.split('_');
                 let first_part = parts.next().unwrap_or("");
                 let (cmd, first_arg_val) = if let Some(idx) = first_part.find('=') {
                     (&first_part[..idx], Some(&first_part[idx+1..]))
@@ -231,17 +237,16 @@ pub fn render_styled_text<F1, F2>(
 
         for char_obj in segment.text.chars() {
             let global_char_idx = *total_char_index as f32;
-            *total_char_index += 1;
 
             let mut tr = Transform::default();
             let mut color = Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
             let mut opacity_mult = 1.0;
             let mut shadow_opts: Option<(Color, f32, f32, f32, f32)> = None;
             let mut skip_render = false;
+            let mut render_char = char_obj.to_string();
             
             for style_str in &segment.styles {
-                let style_str = style_str.replace('_', " ");
-                let mut parts = style_str.split_whitespace();
+                let mut parts = style_str.split('_');
                 let first_part = parts.next().unwrap_or("");
                 
                 let (cmd, first_arg_val) = if let Some(idx) = first_part.find('=') {
@@ -273,30 +278,53 @@ pub fn render_styled_text<F1, F2>(
                     if *total_char_index < start_index {
                         animation_tracker.insert(anim_key, (*total_char_index, start_time));
                     }
-                    let elapsed = (time - start_time) as f32;
+                    let delay = get_f("delay", 0.0);
                     
-                    match cmd {
-                        "type" => {
-                            let speed = get_f("speed", 8.0);
-                            let chars_shown = elapsed * speed + start_index as f32;
-                            if global_char_idx >= chars_shown { skip_render = true; }
-                        },
-                        "fade" => {
-                            let speed = get_f("speed", 3.0);
-                            let trail = get_f("trail", 3.0);
-                            let progress = (elapsed * speed - global_char_idx) / trail;
-                            let alpha = progress.clamp(0.0, 1.0);
-                            opacity_mult *= alpha;
-                        },
-                        "scale" => {
-                            let speed = get_f("speed", 3.0);
-                            let trail = get_f("trail", 3.0);
-                            let progress = (elapsed * speed - global_char_idx) / trail;
-                            let s = progress.clamp(0.0, 1.0);
-                            tr.scale_x *= s;
-                            tr.scale_y *= s;
+                    let elapsed = ((time - start_time) as f32 - delay).max(0.0);
+                    let relative_idx = global_char_idx - start_index as f32;
+                    
+                    let is_in = args.contains_key("in");
+                    let is_out = args.contains_key("out");
+                    
+                    if is_in || is_out {
+                        match cmd {
+                            "type" => {
+                                let speed = get_f("speed", 8.0);
+                                let chars_processed = elapsed * speed;
+                                let cursor = args.get("cursor").unwrap_or(&"");
+                                if is_in {
+                                    if relative_idx >= chars_processed {
+                                        if !cursor.is_empty() && relative_idx > 0.0 && (relative_idx - 1.0) < chars_processed {
+                                            render_char = cursor.to_string();
+                                        } else {
+                                            skip_render = true;
+                                        }
+                                    }
+                                } else {
+                                    if relative_idx < chars_processed { skip_render = true; }
+                                }
+                            },
+                            "fade" => {
+                                let speed = get_f("speed", 3.0);
+                                let trail = get_f("trail", 3.0);
+                                let progress = (elapsed * speed - relative_idx) / trail;
+                                let mut alpha = progress.clamp(0.0, 1.0);
+                                if is_out { alpha = 1.0 - alpha; }
+                                opacity_mult *= alpha;
+                            },
+                            "scale" => {
+                                let speed = get_f("speed", 3.0);
+                                let trail = get_f("trail", 3.0);
+                                let progress = (elapsed * speed - relative_idx) / trail;
+                                let mut s = progress.clamp(0.0, 1.0);
+                                if is_out { s = 1.0 - s; }
+                                tr.scale_x *= s;
+                                tr.scale_y *= s;
+                            }
+                            _ => {}
                         }
-                        _ => {}
+                    } else {
+                        panic!("Animation style '{}' requires either 'in' or 'out' argument.", cmd);
                     }
                 }
 
@@ -453,11 +481,12 @@ pub fn render_styled_text<F1, F2>(
                     shadow_tr.scale_y *= ssy;
                     
                     let shadow_final_color = Color { r: sc.r, g: sc.g, b: sc.b, a: sc.a * opacity_mult };
-                    render_shadow_fn(&char_obj.to_string(), shadow_tr, shadow_final_color);
+                    render_shadow_fn(&render_char, shadow_tr, shadow_final_color);
                 }
                 
-                render_fn(&char_obj.to_string(), tr, color);
+                render_fn(&render_char, tr, color);
             }
+            *total_char_index += 1;
         }
     }
 }
@@ -548,7 +577,7 @@ mod tests {
 
     #[test]
     fn test_render_transform_translate() {
-        let lines = vec!["{transform translate=0.5,0.5|A}".to_string()];
+        let lines = vec!["{transform_translate=0.5,0.5|A}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -563,7 +592,7 @@ mod tests {
 
     #[test]
     fn test_render_transform_scale() {
-        let lines = vec!["{transform scale=2.0|A}".to_string()];
+        let lines = vec!["{transform_scale=2.0|A}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -578,7 +607,7 @@ mod tests {
 
     #[test]
     fn test_render_transform_scale_xy() {
-        let lines = vec!["{transform scale=2.0,0.5|A}".to_string()];
+        let lines = vec!["{transform_scale=2.0,0.5|A}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -593,7 +622,7 @@ mod tests {
 
     #[test]
     fn test_render_transform_rotate() {
-        let lines = vec!["{transform rotate=45|A}".to_string()];
+        let lines = vec!["{transform_rotate=45|A}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -622,7 +651,7 @@ mod tests {
 
     #[test]
     fn test_render_wave_with_params() {
-        let lines = vec!["{wave w=2.0 f=1.0 a=0.5|AB}".to_string()];
+        let lines = vec!["{wave_w=2.0_f=1.0_a=0.5|AB}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -667,7 +696,7 @@ mod tests {
 
     #[test]
     fn test_render_jitter_effect() {
-        let lines = vec!["{jitter radii=0.1,0.1|A}".to_string()];
+        let lines = vec!["{jitter_radii=0.1,0.1|A}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered_t1 = Vec::new();
@@ -686,7 +715,7 @@ mod tests {
 
     #[test]
     fn test_render_gradient_effect() {
-        let lines = vec!["{gradient stops=0:#FF0000,3:#0000FF|ABC}".to_string()];
+        let lines = vec!["{gradient_stops=0:#FF0000,3:#0000FF|ABC}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -734,7 +763,7 @@ mod tests {
 
     #[test]
     fn test_render_shadow_with_color() {
-        let lines = vec!["{shadow color=red|A}".to_string()];
+        let lines = vec!["{shadow_color=red|A}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut shadows = Vec::new();
@@ -748,7 +777,7 @@ mod tests {
 
     #[test]
     fn test_render_shadow_offset() {
-        let lines = vec!["{shadow offset=0.5,0.5|A}".to_string()];
+        let lines = vec!["{shadow_offset=0.5,0.5|A}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -764,7 +793,7 @@ mod tests {
 
     #[test]
     fn test_render_type_animation() {
-        let lines = vec!["{type id=t1|ABC}".to_string()];
+        let lines = vec!["{type_in_id=t1_cursor=\\||ABC}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -776,16 +805,18 @@ mod tests {
         assert_eq!(rendered.len(), 0, "Type animation at time 0 should show nothing");
         
         rendered.clear();
-        render_styled_text(&segments[0], 0.5, 16.0, &mut tracker, &mut 0,
+        render_styled_text(&segments[0], 0.1, 16.0, &mut tracker, &mut 0,
             |c, tr, col| rendered.push((c.to_string(), tr, col)),
             |_, _, _| {});
         
         assert!(rendered.len() > 0, "Type animation after time should show chars");
+
+        assert!(rendered[rendered.len()-1].0 == "|", "Type animation cursor should be present? {:?}", rendered);
     }
 
     #[test]
     fn test_render_fade_animation() {
-        let lines = vec!["{fade id=f1|A}".to_string()];
+        let lines = vec!["{fade_in_id=f1|A}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -807,7 +838,7 @@ mod tests {
 
     #[test]
     fn test_render_scale_animation() {
-        let lines = vec!["{scale id=s1|A}".to_string()];
+        let lines = vec!["{scale_in_id=s1|A}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -878,7 +909,7 @@ mod tests {
 
     #[test]
     fn test_render_gradient_over_time() {
-        let lines = vec!["{gradient speed=10|AB}".to_string()];
+        let lines = vec!["{gradient_speed=10|AB}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered_t1 = Vec::new();
@@ -932,7 +963,7 @@ mod tests {
 
     #[test]
     fn test_render_transform_accumulation() {
-        let lines = vec!["{transform translate=0.5,0|{transform translate=0,0.5|A}}".to_string()];
+        let lines = vec!["{transform_translate=0.5,0|{transform_translate=0,0.5|A}}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -961,7 +992,7 @@ mod tests {
 
     #[test]
     fn test_render_shadow_with_transform() {
-        let lines = vec!["{transform scale=2|{shadow|A}}".to_string()];
+        let lines = vec!["{transform_scale=2|{shadow|A}}".to_string()];
         let segments = parse_text_lines(lines).unwrap();
         let mut tracker = HashMap::new();
         let mut rendered = Vec::new();
@@ -1004,5 +1035,69 @@ mod tests {
         assert_eq!(rendered[0].0, "你", "First unicode char wrong? {:?}", rendered);
         assert_eq!(rendered[1].0, "好", "Second unicode char wrong? {:?}", rendered);
         assert_eq!(rendered[2].0, "🌍", "Third unicode char wrong? {:?}", rendered);
+    }
+
+    #[test]
+    fn test_render_type_out_animation() {
+        let lines = vec!["{type_out_id=t2|ABC}".to_string()];
+        let segments = parse_text_lines(lines).unwrap();
+        let mut tracker = HashMap::new();
+        let mut rendered = Vec::new();
+        
+        render_styled_text(&segments[0], 0.0, 16.0, &mut tracker, &mut 0,
+            |c, tr, col| rendered.push((c.to_string(), tr, col)),
+            |_, _, _| {});
+        
+        assert_eq!(rendered.len(), 3, "Type out animation at time 0 should show all chars");
+        
+        rendered.clear();
+        render_styled_text(&segments[0], 0.5, 16.0, &mut tracker, &mut 0,
+            |c, tr, col| rendered.push((c.to_string(), tr, col)),
+            |_, _, _| {});
+        
+        assert_eq!(rendered.len(), 0, "Type out animation after time should hide chars");
+    }
+
+    #[test]
+    fn test_render_fade_out_animation() {
+        let lines = vec!["{fade_out_id=f2|A}".to_string()];
+        let segments = parse_text_lines(lines).unwrap();
+        let mut tracker = HashMap::new();
+        let mut rendered = Vec::new();
+        
+        render_styled_text(&segments[0], 0.0, 16.0, &mut tracker, &mut 0,
+            |c, tr, col| rendered.push((c.to_string(), tr, col)),
+            |_, _, _| {});
+        
+        assert!(rendered.len() > 0);
+        assert!(rendered[0].2.a > 0.9, "Fade out animation alpha at time 0 should be high? {:?}", rendered);
+        
+        rendered.clear();
+        render_styled_text(&segments[0], 2.0, 16.0, &mut tracker, &mut 0,
+            |c, tr, col| rendered.push((c.to_string(), tr, col)),
+            |_, _, _| {});
+        
+        assert!(rendered[0].2.a < 0.1, "Fade out animation alpha after time should be low? {:?}", rendered);
+    }
+
+    #[test]
+    fn test_render_scale_out_animation() {
+        let lines = vec!["{scale_out_id=s2|A}".to_string()];
+        let segments = parse_text_lines(lines).unwrap();
+        let mut tracker = HashMap::new();
+        let mut rendered = Vec::new();
+        
+        render_styled_text(&segments[0], 0.0, 16.0, &mut tracker, &mut 0,
+            |c, tr, col| rendered.push((c.to_string(), tr, col)),
+            |_, _, _| {});
+        
+        assert!(rendered[0].1.scale_x > 0.9, "Scale out animation scale_x at time 0 should be large? {:?}", rendered);
+        
+        rendered.clear();
+        render_styled_text(&segments[0], 2.0, 16.0, &mut tracker, &mut 0,
+            |c, tr, col| rendered.push((c.to_string(), tr, col)),
+            |_, _, _| {});
+        
+        assert!(rendered[0].1.scale_x < 0.1, "Scale out animation scale_x after time should be small? {:?}", rendered);
     }
 }

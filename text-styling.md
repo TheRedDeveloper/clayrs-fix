@@ -53,11 +53,13 @@ When multiple tags are active, they are processed in this strict order:
 Sets the fill color of the text.
 * **Parameter:** `color=VALUE` (Hex code `#RRGGBB`, `(r,g,b)`, or named color)
 * **Supported Names:** White, Black, LightGray, DarkGray, Red, Orange, Yellow, Lime, Green, Cyan, LightBlue, Blue, Purple, Magenta, Brown, Pink. Case insensitive.
+Example: `{color=red|Red Text}`
 
 **opacity**
 
 Sets the transparency of the text.
 * **Parameter:** `opacity=FLOAT` (0.0 to 1.0)
+Example: `{opacity=0.5|50% Transparent Text}`
 
 ---
 
@@ -126,26 +128,30 @@ Prevents the text from rendering completely.
 
 **type**
 
-Typing writer effect. Characters appear sequentially.
+Typing writer effect. Characters appear sequentially, left to right.
 * `MODE`: `in` or `out`.
 * `id=WORD`: Unique tracking identifier.
 * `speed=FLOAT`: Characters per second. **Def:** 8
-Example: `{type_in_id=foo|Text to type}`
+* `delay=FLOAT`: Delay in seconds before starting. **Def:** 0
+* `cursor=CHAR`: Cursor character to display while typing. **Def:** none
+Example: `{type_in_id=foo_cursor=\||Text to type}`
 
 **fade**
 
-Opacity transition.
+Opacity transition, left to right.
 * `MODE`: `in` or `out`.
 * `id=WORD`: Unique tracking identifier.
 * `speed=FLOAT`: Characters per second. **Def:** 3
 * `trail=FLOAT`: Length of the fade gradient in characters. **Def:** 3
+* `delay=FLOAT`: Delay in seconds before starting. **Def:** 0
 Example: `{fade_out_id=bar_speed=5|Fade this text out quickly}`
 
 **scale**
 
-Size transition (pop-in/pop-out).
+Size transition (pop-in/pop-out), left to right.
 * `MODE`: `in` or `out`.
 * `id=WORD`: Unique tracking identifier.
 * `speed=FLOAT`: Characters per second. **Def:** 3
 * `trail=FLOAT`: Length of the scaling gradient in characters. **Def:** 3
+* `delay=FLOAT`: Delay in seconds before starting. **Def:** 0
 Example: `{scale_in_id=buzz_speed=0.1_tail=10|Characters become bigger reaaaaaaaaaaaaaally slowly}`
