@@ -29,6 +29,7 @@ use text::TextConfig;
 use text::TextElementConfig;
 #[derive(Copy, Clone)]
 pub struct Declaration<'render, ImageElementData: 'render, CustomElementData: 'render> {
+    id: Option<Id>,
     inner: Clay_ElementDeclaration,
     _phantom: PhantomData<(&'render CustomElementData, &'render ImageElementData)>,
 }
@@ -38,7 +39,9 @@ impl<'render, ImageElementData: 'render, CustomElementData: 'render>
 {
     #[inline]
     pub fn new() -> Self {
-        crate::mem::zeroed_init()
+        let mut zeroed: Self = crate::mem::zeroed_init();
+        zeroed.id = None; // Zeroed doesn't mean None for Option
+        zeroed
     }
 
     #[inline]
@@ -64,7 +67,7 @@ impl<'render, ImageElementData: 'render, CustomElementData: 'render>
 
     #[inline]
     pub fn id(&mut self, id: Id) -> &mut Self {
-        self.inner.id = id.id;
+        self.id = Some(id);
         self
     }
 
@@ -198,7 +201,11 @@ impl<'render, 'clay: 'render, ImageElementData: 'render, CustomElementData: 'ren
     ) {
         unsafe {
             Clay_SetCurrentContext(self.clay.context);
-            Clay__OpenElement();
+            if let Some(id) = declaration.id {
+                Clay__OpenElementWithId(id.id);
+            } else {
+                Clay__OpenElement();
+            }
             Clay__ConfigureOpenElement(declaration.inner);
         }
 
@@ -221,12 +228,16 @@ impl<'render, 'clay: 'render, ImageElementData: 'render, CustomElementData: 'ren
     ) {
         unsafe {
             Clay_SetCurrentContext(self.clay.context);
-            Clay__OpenElement();
         }
-
+        
         let declaration = g(self);
-
+        
         unsafe {
+            if let Some(id) = declaration.id {
+                Clay__OpenElementWithId(id.id);
+            } else {
+                Clay__OpenElement();
+            }
             Clay__ConfigureOpenElement(declaration.inner);
         }
 
