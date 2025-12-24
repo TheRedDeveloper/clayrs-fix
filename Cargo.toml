@@ -18,6 +18,7 @@ raylib-renderer = ["raylib"]
 skia-renderer = ["skia-safe"]
 macroquad-renderer = ["macroquad"]
 macroquad-text-styling = ["macroquad-renderer"]
+macroquad-texture-manager = ["macroquad-renderer"]
 
 std = []
 wasm = []
