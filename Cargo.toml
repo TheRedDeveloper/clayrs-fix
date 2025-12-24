@@ -16,6 +16,9 @@ cc = "1.0"
 default = ["std"]
 raylib-renderer = ["raylib"]
 skia-renderer = ["skia-safe"]
+macroquad-renderer = ["macroquad"]
+macroquad-text-styling = ["macroquad-renderer"]
+macroquad-texture-manager = ["macroquad-renderer"]
 
 std = []
 wasm = []
@@ -24,6 +27,7 @@ debug = []
 [dependencies]
 skia-safe = { version = "0.86.0", features = ["gl"], optional = true }
 raylib = { version = "5.5.0", optional = true }
+macroquad = { version = "0.4", optional = true }
 
 [dev-dependencies]
 winit = "0.30"
