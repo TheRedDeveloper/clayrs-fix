@@ -255,6 +255,7 @@ impl<'render, 'clay: 'render, ImageElementData: 'render, CustomElementData: 'ren
         unsafe { Clay_Hovered() }
     }
 
+    #[cfg(feature = "std")]
     pub fn on_hover<F, T>(&self, callback: F, user_data: T)
     where
         F: Fn(Id, Clay_PointerData, &mut T) + 'static,
