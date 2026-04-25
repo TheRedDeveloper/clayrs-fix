@@ -1,8 +1,9 @@
+use std::f32::consts::{PI, FRAC_PI_2};
 use macroquad::prelude::*;
 use crate::{math::BoundingBox, render_commands::{CornerRadii, RenderCommand, RenderCommandConfig}};
 
 #[cfg(feature = "macroquad-text-styling")]
-use crate::renderers::macroquad_text_styling::{parse_text_lines, render_styled_text, StyledSegment};
+use crate::renderers::macroquad_text_styling::{render_styled_text, StyledSegment};
 #[cfg(feature = "macroquad-text-styling")]
 use std::collections::HashMap;
 
@@ -129,13 +130,93 @@ fn clay_to_macroquad_color(clay_color: &crate::color::Color) -> Color {
     }
 }
 
-fn draw_good_circle(x: f32, y: f32, r: f32, color: Color) {
-    let sides = ((2.0 * std::f32::consts::PI * r) / PIXELS_PER_POINT).max(20.0);
-    draw_poly(x, y, sides.min(255.0) as u8, r, 0.0, color);
+fn draw_good_rounded_rectangle(x: f32, y: f32, w: f32, h: f32, cr: &CornerRadii, color: Color) {
+    if cr.top_left == 0.0 && cr.top_right == 0.0 && cr.bottom_left == 0.0 && cr.bottom_right == 0.0 {
+        draw_rectangle(x, y, w, h, color);
+        return;
+    }
+
+    let est_verts = [cr.top_left, cr.top_right, cr.bottom_left, cr.bottom_right]
+        .iter()
+        .map(|&r| if r <= 0.0 { 1 } else { ((FRAC_PI_2 * r) / PIXELS_PER_POINT).max(6.0) as usize + 1 })
+        .sum::<usize>();
+    let mut outline: Vec<Vec2> = Vec::with_capacity(est_verts);
+
+    let add_arc = |outline: &mut Vec<Vec2>, cx: f32, cy: f32, radius: f32, start_angle: f32, end_angle: f32| {
+        if radius <= 0.0 {
+            outline.push(Vec2::new(cx, cy));
+            return;
+        }
+        let sides = ((FRAC_PI_2 * radius) / PIXELS_PER_POINT).max(6.0) as usize;
+        let step = (end_angle - start_angle) / sides as f32;
+        let step_cos = step.cos();
+        let step_sin = step.sin();
+        let mut dx = start_angle.cos() * radius;
+        let mut dy = start_angle.sin() * radius;
+        for _ in 0..=sides {
+            outline.push(Vec2::new(cx + dx, cy + dy));
+            let new_dx = dx * step_cos - dy * step_sin;
+            let new_dy = dx * step_sin + dy * step_cos;
+            dx = new_dx;
+            dy = new_dy;
+        }
+    };
+
+    add_arc(&mut outline, x + cr.top_left, y + cr.top_left, cr.top_left,
+            PI, 3.0 * FRAC_PI_2);
+    add_arc(&mut outline, x + w - cr.top_right, y + cr.top_right, cr.top_right,
+            3.0 * FRAC_PI_2, 2.0 * PI);
+    add_arc(&mut outline, x + w - cr.bottom_right, y + h - cr.bottom_right, cr.bottom_right,
+            0.0, FRAC_PI_2);
+    add_arc(&mut outline, x + cr.bottom_left, y + h - cr.bottom_left, cr.bottom_left,
+            FRAC_PI_2, PI);
+
+    let n = outline.len();
+    if n < 3 { return; }
+
+    let color_bytes = [
+        (color.r * 255.0) as u8,
+        (color.g * 255.0) as u8,
+        (color.b * 255.0) as u8,
+        (color.a * 255.0) as u8,
+    ];
+
+    let cx = x + w / 2.0;
+    let cy = y + h / 2.0;
+
+    let mut vertices = Vec::with_capacity(n + 1);
+    vertices.push(Vertex {
+        position: Vec3::new(cx, cy, 0.0),
+        uv: Vec2::new(0.5, 0.5),
+        color: color_bytes,
+        normal: Vec4::new(0.0, 0.0, 1.0, 0.0),
+    });
+    for p in &outline {
+        vertices.push(Vertex {
+            position: Vec3::new(p.x, p.y, 0.0),
+            uv: Vec2::new((p.x - x) / w, (p.y - y) / h),
+            color: color_bytes,
+            normal: Vec4::new(0.0, 0.0, 1.0, 0.0),
+        });
+    }
+
+    let mut indices = Vec::with_capacity(n * 3);
+    for i in 0..n {
+        indices.push(0u16); // center
+        indices.push((i + 1) as u16);
+        indices.push(((i + 1) % n + 1) as u16);
+    }
+
+    let mesh = Mesh {
+        vertices,
+        indices,
+        texture: None,
+    };
+    draw_mesh(&mesh);
 }
 
 struct RenderState {
-    clip: Option<(i32, i32, i32, i32)>,
+    clip_stack: Vec<(i32, i32, i32, i32)>,
     #[cfg(feature = "macroquad-text-styling")]
     style_stack: Vec<String>,
     #[cfg(feature = "macroquad-text-styling")]
@@ -145,7 +226,7 @@ struct RenderState {
 impl RenderState {
     fn new() -> Self {
         Self {
-            clip: None,
+            clip_stack: Vec::new(),
             #[cfg(feature = "macroquad-text-styling")]
             style_stack: Vec::new(),
             #[cfg(feature = "macroquad-text-styling")]
@@ -164,91 +245,30 @@ fn rounded_rectangle_texture(cr: &CornerRadii, bb: &BoundingBox, clip: &Option<(
         get_internal_gl().quad_gl.scissor(None);
     };
 
-    // Edges
-    // Top edge
-    if cr.top_left > 0.0 || cr.top_right > 0.0 {
-        draw_rectangle(
-            cr.top_left,
-            0.0,
-            bb.width - cr.top_left - cr.top_right,
-            bb.height - cr.bottom_left.max(cr.bottom_right),
-            WHITE
-        );
-    }
-    // Left edge
-    if cr.top_left > 0.0 || cr.bottom_left > 0.0 {
-        draw_rectangle(
-            0.0,
-            cr.top_left,
-            bb.width - cr.top_right.max(cr.bottom_right),
-            bb.height - cr.top_left - cr.bottom_left,
-            WHITE
-        );
-    }
-    // Bottom edge
-    if cr.bottom_left > 0.0 || cr.bottom_right > 0.0 {
-        draw_rectangle(
-            cr.bottom_left,
-            cr.top_left.max(cr.top_right),
-            bb.width - cr.bottom_left - cr.bottom_right,
-            bb.height - cr.top_left.max(cr.top_right),
-            WHITE
-        );
-    }
-    // Right edge
-    if cr.top_right > 0.0 || cr.bottom_right > 0.0 {
-        draw_rectangle(
-            bb.width - cr.top_right,
-            cr.top_right,
-            bb.width - cr.top_left.max(cr.bottom_left),
-            bb.height - cr.top_right - cr.bottom_right,
-            WHITE
-        );
-    }
-
-    // Corners
-    // Top-left corner
-    if cr.top_left > 0.0 {
-        draw_good_circle(
-            cr.top_left,
-            cr.top_left,
-            cr.top_left,
-            WHITE,
-        );
-    }
-    // Top-right corner
-    if cr.top_right > 0.0 {
-        draw_good_circle(
-            bb.width - cr.top_right,
-            cr.top_right,
-            cr.top_right,
-            WHITE,
-        );
-    }
-    // Bottom-left corner
-    if cr.bottom_left > 0.0 {
-        draw_good_circle(
-            cr.bottom_left,
-            bb.height - cr.bottom_left,
-            cr.bottom_left,
-            WHITE,
-        );
-    }
-    // Bottom-right corner
-    if cr.bottom_right > 0.0 {
-        draw_good_circle(
-            bb.width - cr.bottom_right,
-            bb.height - cr.bottom_right,
-            cr.bottom_right,
-            WHITE,
-        );
-    }
+    draw_good_rounded_rectangle(0.0, 0.0, bb.width, bb.height, cr, WHITE);
 
     set_default_camera();
     unsafe {
         get_internal_gl().quad_gl.scissor(*clip);
     }
     render_target.texture
+}
+
+fn intersect_scissor(
+    a: (i32, i32, i32, i32),
+    b: (i32, i32, i32, i32),
+) -> (i32, i32, i32, i32) {
+    let ax2 = a.0.saturating_add(a.2);
+    let ay2 = a.1.saturating_add(a.3);
+    let bx2 = b.0.saturating_add(b.2);
+    let by2 = b.1.saturating_add(b.3);
+
+    let x1 = a.0.max(b.0);
+    let y1 = a.1.max(b.1);
+    let x2 = ax2.min(bx2);
+    let y2 = ay2.min(by2);
+
+    (x1, y1, (x2 - x1).max(0), (y2 - y1).max(0))
 }
 
 /// Render a TinyVG image to a Texture2D, scaled to fit the given dimensions.
@@ -887,8 +907,6 @@ fn render_common_command<'a, ImageType, CustomElementData>(
     match &command.config {
         #[cfg(feature = "macroquad-text-styling")]
         RenderCommandConfig::Text(config) => {
-            use crate::renderers::macroquad_text_styling::StyledSegment;
-
             let bb = command.bounding_box;
             let font_size = config.font_size as f32;
             let font = Some(&fonts[config.font_id as usize]);
@@ -1117,173 +1135,189 @@ fn render_common_command<'a, ImageType, CustomElementData>(
             let bw = &config.width;
             let cr = &config.corner_radii;
             let color = clay_to_macroquad_color(&config.color);
-            if cr.top_left == 0.0 && cr.top_right == 0.0 && cr.bottom_left == 0.0 && cr.bottom_right == 0.0 {
-                if bw.left == bw.right && bw.left == bw.top && bw.left == bw.bottom {
-                    let border_width = bw.left as f32;
-                    draw_rectangle_lines(
-                        bb.x - border_width / 2.0,
-                        bb.y - border_width / 2.0,
-                        bb.width + border_width,
-                        bb.height + border_width,
-                        border_width,
-                        color
-                    );
-                } else {
-                    // Top edge
-                    draw_line(
-                        bb.x,
-                        bb.y - bw.top as f32 / 2.0,
-                        bb.x + bb.width,
-                        bb.y - bw.top as f32 / 2.0,
-                        bw.top as f32,
-                        color
-                    );
-                    // Left edge
-                    draw_line(
-                        bb.x - bw.left as f32 / 2.0,
-                        bb.y,
-                        bb.x - bw.left as f32 / 2.0,
-                        bb.y + bb.height,
-                        bw.left as f32,
-                        color
-                    );
-                    // Bottom edge
-                    draw_line(
-                        bb.x,
-                        bb.y + bb.height + bw.bottom as f32 / 2.0,
-                        bb.x + bb.width,
-                        bb.y + bb.height + bw.bottom as f32 / 2.0,
-                        bw.bottom as f32,
-                        color
-                    );
-                    // Right edge
-                    draw_line(
-                        bb.x + bb.width + bw.right as f32 / 2.0,
-                        bb.y,
-                        bb.x + bb.width + bw.right as f32 / 2.0,
-                        bb.y + bb.height,
-                        bw.right as f32,
-                        color
-                    );
-                }
-            } else {
-                // Edges
-                // Top edge
-                draw_line(
-                    bb.x + cr.top_left,
-                    bb.y - bw.top as f32 / 2.0,
-                    bb.x + bb.width - cr.top_right,
-                    bb.y - bw.top as f32 / 2.0,
-                    bw.top as f32,
-                    color
-                );
-                // Left edge
-                draw_line(
-                    bb.x - bw.left as f32 / 2.0,
-                    bb.y + cr.top_left,
-                    bb.x - bw.left as f32 / 2.0,
-                    bb.y + bb.height - cr.bottom_left,
-                    bw.left as f32,
-                    color
-                );
-                // Bottom edge
-                draw_line(
-                    bb.x + cr.bottom_left,
-                    bb.y + bb.height + bw.bottom as f32 / 2.0,
-                    bb.x + bb.width - cr.bottom_right,
-                    bb.y + bb.height + bw.bottom as f32 / 2.0,
-                    bw.bottom as f32,
-                    color
-                );
-                // Right edge
-                draw_line(
-                    bb.x + bb.width + bw.right as f32 / 2.0,
-                    bb.y + cr.top_right,
-                    bb.x + bb.width + bw.right as f32 / 2.0,
-                    bb.y + bb.height - cr.bottom_right,
-                    bw.right as f32,
-                    color
-                );
 
-                // Corners
-                // Top-left corner
-                if cr.top_left > 0.0 {
-                    let width = bw.left.max(bw.top) as f32;
-                    let points = ((std::f32::consts::PI * (cr.top_left + width)) / 2.0 / PIXELS_PER_POINT).max(5.0);
-                    draw_arc(
-                        bb.x + cr.top_left,
-                        bb.y + cr.top_left,
-                        points as u8,
-                        cr.top_left,
-                        180.0,
-                        bw.left as f32,
-                        90.0,
-                        color
-                    );
-                }
-                // Top-right corner
-                if cr.top_right > 0.0 {
-                    let width = bw.top.max(bw.right) as f32;
-                    let points = ((std::f32::consts::PI * (cr.top_right + width)) / 2.0 / PIXELS_PER_POINT).max(5.0);
-                    draw_arc(
-                        bb.x + bb.width - cr.top_right,
-                        bb.y + cr.top_right,
-                        points as u8,
-                        cr.top_right,
-                        270.0,
-                        bw.top as f32,
-                        90.0,
-                        color
-                    );
-                }
-                // Bottom-left corner
-                if cr.bottom_left > 0.0 {
-                    let width = bw.left.max(bw.bottom) as f32;
-                    let points = ((std::f32::consts::PI * (cr.bottom_left + width)) / 2.0 / PIXELS_PER_POINT).max(5.0);
-                    draw_arc(
-                        bb.x + cr.bottom_left,
-                        bb.y + bb.height - cr.bottom_left,
-                        points as u8,
-                        cr.bottom_left,
-                        90.0,
-                        bw.bottom as f32,
-                        90.0,
-                        color
-                    );
-                }
-                // Bottom-right corner
-                if cr.bottom_right > 0.0 {
-                    let width = bw.bottom.max(bw.right) as f32;
-                    let points = ((std::f32::consts::PI * (cr.bottom_right + width)) / 2.0 / PIXELS_PER_POINT).max(5.0);
-                    draw_arc(
-                        bb.x + bb.width - cr.bottom_right,
-                        bb.y + bb.height - cr.bottom_right,
-                        points as u8,
-                        cr.bottom_right,
-                        0.0,
-                        bw.right as f32,
-                        90.0,
-                        color
-                    );
+            let s = 1.0; // assume border as outside
+
+            let get_sides = |corner: f32| {
+                (PI * corner / (2.0 * PIXELS_PER_POINT)).max(5.0) as usize
+            };
+            let v = |x: f32, y: f32| Vertex::new(x, y, 0., 0., 0., color);
+
+            let top = bw.top as f32;
+            let left = bw.left as f32;
+            let bottom = bw.bottom as f32;
+            let right = bw.right as f32;
+            let tl_r = cr.top_left;
+            let tr_r = cr.top_right;
+            let bl_r = cr.bottom_left;
+            let br_r = cr.bottom_right;
+
+            let ox1 = bb.x - left * s;
+            let ox2 = bb.x + bb.width + right * s;
+            let oy1 = bb.y - top * s;
+            let oy2 = bb.y + bb.height + bottom * s;
+            let ix1 = bb.x + left * (1.0 - s);
+            let ix2 = bb.x + bb.width - right * (1.0 - s);
+            let iy1 = bb.y + top * (1.0 - s);
+            let iy2 = bb.y + bb.height - bottom * (1.0 - s);
+
+            let o_tl_rx = tl_r + left * s;
+            let o_tl_ry = tl_r + top * s;
+            let o_tr_rx = tr_r + right * s;
+            let o_tr_ry = tr_r + top * s;
+            let o_bl_rx = bl_r + left * s;
+            let o_bl_ry = bl_r + bottom * s;
+            let o_br_rx = br_r + right * s;
+            let o_br_ry = br_r + bottom * s;
+            let i_tl_rx = (tl_r - left * (1.0 - s)).max(0.0);
+            let i_tl_ry = (tl_r - top * (1.0 - s)).max(0.0);
+            let i_tr_rx = (tr_r - right * (1.0 - s)).max(0.0);
+            let i_tr_ry = (tr_r - top * (1.0 - s)).max(0.0);
+            let i_bl_rx = (bl_r - left * (1.0 - s)).max(0.0);
+            let i_bl_ry = (bl_r - bottom * (1.0 - s)).max(0.0);
+            let i_br_rx = (br_r - right * (1.0 - s)).max(0.0);
+            let i_br_ry = (br_r - bottom * (1.0 - s)).max(0.0);
+
+            let tl_sides = get_sides(o_tl_rx.max(o_tl_ry).max(i_tl_rx).max(i_tl_ry));
+            let tr_sides = get_sides(o_tr_rx.max(o_tr_ry).max(i_tr_rx).max(i_tr_ry));
+            let bl_sides = get_sides(o_bl_rx.max(o_bl_ry).max(i_bl_rx).max(i_bl_ry));
+            let br_sides = get_sides(o_br_rx.max(o_br_ry).max(i_br_rx).max(i_br_ry));
+            let side_count = tl_sides + tr_sides + bl_sides + br_sides;
+
+            let mut vertices = Vec::<Vertex>::with_capacity(16 + side_count * 4);
+            let mut indices = Vec::<u16>::with_capacity(24 + side_count * 6);
+
+            // 4 quads
+            vertices.extend([
+                // Top edge
+                v(ox1 + o_tl_rx, oy1),
+                v(ox2 - o_tr_rx, oy1),
+                v(ix1 + i_tl_rx, iy1),
+                v(ix2 - i_tr_rx, iy1),
+                // Bottom edge
+                v(ox1 + o_bl_rx, oy2),
+                v(ox2 - o_br_rx, oy2),
+                v(ix1 + i_bl_rx, iy2),
+                v(ix2 - i_br_rx, iy2),
+                // Left edge
+                v(ox1, oy1 + o_tl_ry),
+                v(ox1, oy2 - o_bl_ry),
+                v(ix1, iy1 + i_tl_ry),
+                v(ix1, iy2 - i_bl_ry),
+                // Right edge
+                v(ox2, oy1 + o_tr_ry),
+                v(ox2, oy2 - o_br_ry),
+                v(ix2, iy1 + i_tr_ry),
+                v(ix2, iy2 - i_br_ry),
+            ]);
+            for l in [0, 4, 8, 12] {
+                indices.extend([
+                    l, l + 1, l + 2,
+                    l + 1, l + 3, l + 2
+                ]);
+            }
+
+            let corners = [
+                (
+                    tl_sides,
+                    PI,
+                    ox1 + o_tl_rx,
+                    oy1 + o_tl_ry,
+                    ix1 + i_tl_rx,
+                    iy1 + i_tl_ry,
+                    o_tl_rx,
+                    o_tl_ry,
+                    i_tl_rx,
+                    i_tl_ry,
+                ),
+                (
+                    tr_sides,
+                    PI * 1.5,
+                    ox2 - o_tr_rx,
+                    oy1 + o_tr_ry,
+                    ix2 - i_tr_rx,
+                    iy1 + i_tr_ry,
+                    o_tr_rx,
+                    o_tr_ry,
+                    i_tr_rx,
+                    i_tr_ry,
+                ),
+                (
+                    bl_sides,
+                    PI * 0.5,
+                    ox1 + o_bl_rx,
+                    oy2 - o_bl_ry,
+                    ix1 + i_bl_rx,
+                    iy2 - i_bl_ry,
+                    o_bl_rx,
+                    o_bl_ry,
+                    i_bl_rx,
+                    i_bl_ry,
+                ),
+                (
+                    br_sides,
+                    0.,
+                    ox2 - o_br_rx,
+                    oy2 - o_br_ry,
+                    ix2 - i_br_rx,
+                    iy2 - i_br_ry,
+                    o_br_rx,
+                    o_br_ry,
+                    i_br_rx,
+                    i_br_ry,
+                ),
+            ];
+
+            for (sides, start, ocx, ocy, icx, icy, o_rx, o_ry, i_rx, i_ry) in corners {
+                let step = (PI / 2.) / (sides as f32);
+
+                for i in 0..sides {
+                    let i = i as f32;
+                    let a1 = start + i * step;
+                    let a2 = a1 + step;
+                    let l = vertices.len() as u16;
+
+                    // quad
+                    vertices.extend([
+                        v(ocx + a1.cos() * o_rx, ocy + a1.sin() * o_ry),
+                        v(ocx + a2.cos() * o_rx, ocy + a2.sin() * o_ry),
+                        v(icx + a1.cos() * i_rx, icy + a1.sin() * i_ry),
+                        v(icx + a2.cos() * i_rx, icy + a2.sin() * i_ry),
+                    ]);
+                    indices.extend([
+                        l, l + 1, l + 2,
+                        l + 1, l + 3, l + 2
+                    ]);
                 }
             }
+
+            draw_mesh(&Mesh { vertices, indices, texture: None });
         }
         RenderCommandConfig::ScissorStart() => {
             let bb = command.bounding_box;
-            state.clip = Some((
-                bb.x as i32,
-                bb.y as i32,
-                bb.width as i32,
-                bb.height as i32,
-            ));
+            let dpi = macroquad::miniquad::window::dpi_scale();
+            let next_clip = (
+                (bb.x * dpi) as i32,
+                (bb.y * dpi) as i32,
+                (bb.width * dpi) as i32,
+                (bb.height * dpi) as i32,
+            );
+
+            let effective_clip = if let Some(parent_clip) = state.clip_stack.last().copied() {
+                intersect_scissor(parent_clip, next_clip)
+            } else {
+                next_clip
+            };
+
+            state.clip_stack.push(effective_clip);
             unsafe {
-                get_internal_gl().quad_gl.scissor(state.clip);
+                get_internal_gl().quad_gl.scissor(state.clip_stack.last().copied());
             }
         }
         RenderCommandConfig::ScissorEnd() => {
-            state.clip = None;
+            state.clip_stack.pop();
             unsafe {
-                get_internal_gl().quad_gl.scissor(None);
+                get_internal_gl().quad_gl.scissor(state.clip_stack.last().copied());
             }
         }
         RenderCommandConfig::Custom(_) => {
@@ -1323,8 +1357,8 @@ pub fn clay_macroquad_render<'a, CustomElementData: 'a>(
                         },
                     );
                 } else {
-                    let mut resized_image: Image = resize(&image.data, bb.height, bb.width, &state.clip).get_texture_data();
-                    let rounded_rect: Image = rounded_rectangle_texture(cr, &bb, &state.clip).get_texture_data();
+                    let mut resized_image: Image = resize(&image.data, bb.height, bb.width, &state.clip_stack.last().copied()).get_texture_data();
+                    let rounded_rect: Image = rounded_rectangle_texture(cr, &bb, &state.clip_stack.last().copied()).get_texture_data();
 
                     for i in 0..resized_image.bytes.len()/4 {
                         let this_alpha = resized_image.bytes[i * 4 + 3] as f32 / 255.0;
@@ -1348,108 +1382,7 @@ pub fn clay_macroquad_render<'a, CustomElementData: 'a>(
                 let bb = command.bounding_box;
                 let color = clay_to_macroquad_color(&config.color);
                 let cr = &config.corner_radii;
-
-                if cr.top_left == 0.0 && cr.top_right == 0.0 && cr.bottom_left == 0.0 && cr.bottom_right == 0.0 {
-                    draw_rectangle(
-                        bb.x,
-                        bb.y,
-                        bb.width,
-                        bb.height,
-                        color
-                    );
-                } else if color.a == 1.0 {
-                    // Edges
-                    // Top edge
-                    if cr.top_left > 0.0 || cr.top_right > 0.0 {
-                        draw_rectangle(
-                            bb.x + cr.top_left,
-                            bb.y,
-                            bb.width - cr.top_left - cr.top_right,
-                            bb.height - cr.bottom_left.max(cr.bottom_right),
-                            color
-                        );
-                    }
-                    // Left edge
-                    if cr.top_left > 0.0 || cr.bottom_left > 0.0 {
-                        draw_rectangle(
-                            bb.x,
-                            bb.y + cr.top_left,
-                            bb.width - cr.top_right.max(cr.bottom_right),
-                            bb.height - cr.top_left - cr.bottom_left,
-                            color
-                        );
-                    }
-                    // Bottom edge
-                    if cr.bottom_left > 0.0 || cr.bottom_right > 0.0 {
-                        draw_rectangle(
-                            bb.x + cr.bottom_left,
-                            bb.y + cr.top_left.max(cr.top_right),
-                            bb.width - cr.bottom_left - cr.bottom_right,
-                            bb.height - cr.top_left.max(cr.top_right),
-                            color
-                        );
-                    }
-                    // Right edge
-                    if cr.top_right > 0.0 || cr.bottom_right > 0.0 {
-                        draw_rectangle(
-                            bb.x + cr.top_left.max(cr.bottom_left),
-                            bb.y + cr.top_right,
-                            bb.width - cr.top_left.max(cr.bottom_left),
-                            bb.height - cr.top_right - cr.bottom_right,
-                            color
-                        );
-                    }
-
-                    // Corners
-                    // Top-left corner
-                    if cr.top_left > 0.0 {
-                        draw_good_circle(
-                            bb.x + cr.top_left,
-                            bb.y + cr.top_left,
-                            cr.top_left,
-                            color,
-                        );
-                    }
-                    // Top-right corner
-                    if cr.top_right > 0.0 {
-                        draw_good_circle(
-                            bb.x + bb.width - cr.top_right,
-                            bb.y + cr.top_right,
-                            cr.top_right,
-                            color,
-                        );
-                    }
-                    // Bottom-left corner
-                    if cr.bottom_left > 0.0 {
-                        draw_good_circle(
-                            bb.x + cr.bottom_left,
-                            bb.y + bb.height - cr.bottom_left,
-                            cr.bottom_left,
-                            color,
-                        );
-                    }
-                    // Bottom-right corner
-                    if cr.bottom_right > 0.0 {
-                        draw_good_circle(
-                            bb.x + bb.width - cr.bottom_right,
-                            bb.y + bb.height - cr.bottom_right,
-                            cr.bottom_right,
-                            color,
-                        );
-                    }
-                } else {
-                    draw_texture_ex(
-                        &rounded_rectangle_texture(cr, &bb, &state.clip),
-                        bb.x,
-                        bb.y,
-                        color,
-                        DrawTextureParams {
-                            dest_size: Some(Vec2::new(bb.width, bb.height)),
-                            flip_y: true,
-                            ..Default::default()
-                        },
-                    );
-                }
+                draw_good_rounded_rectangle(bb.x, bb.y, bb.width, bb.height, cr, color);
             }
             _ => render_common_command(&command, fonts, &handle_custom_command, &mut state),
         }
@@ -1491,7 +1424,7 @@ pub async fn clay_macroquad_render<'a, CustomElementData: 'a>(
                         cr.top_right,
                         cr.bottom_left,
                         cr.bottom_right,
-                        state.clip
+                        state.clip_stack.last().copied()
                     );
                     let has_corner_radii = cr.top_left > 0.0 || cr.top_right > 0.0 || cr.bottom_left > 0.0 || cr.bottom_right > 0.0;
                     let texture = if !has_corner_radii {
@@ -1500,7 +1433,7 @@ pub async fn clay_macroquad_render<'a, CustomElementData: 'a>(
                                 manager.get_or_create_async(key, async || {
                                     match load_file(path).await {
                                         Ok(tvg_bytes) => {
-                                            if let Some(tvg_texture) = render_tinyvg_texture(&tvg_bytes, bb.width, bb.height, &state.clip) {
+                                            if let Some(tvg_texture) = render_tinyvg_texture(&tvg_bytes, bb.width, bb.height, &state.clip_stack.last().copied()) {
                                                 tvg_texture
                                             } else {
                                                 warn!("Failed to load TinyVG image: {}", path);
@@ -1516,7 +1449,7 @@ pub async fn clay_macroquad_render<'a, CustomElementData: 'a>(
                             }
                             Asset::Bytes { file_name, data: tvg_bytes } => {
                                 manager.get_or_create(key, || {
-                                    if let Some(tvg_texture) = render_tinyvg_texture(&tvg_bytes, bb.width, bb.height, &state.clip) {
+                                    if let Some(tvg_texture) = render_tinyvg_texture(&tvg_bytes, bb.width, bb.height, &state.clip_stack.last().copied()) {
                                         tvg_texture
                                     } else {
                                         warn!("Failed to load TinyVG image: {}", file_name);
@@ -1536,7 +1469,7 @@ pub async fn clay_macroquad_render<'a, CustomElementData: 'a>(
                             0.0,
                             0.0,
                             0.0,
-                            state.clip
+                            state.clip_stack.last().copied()
                         );
                         
                         let base_texture = if let Some(cached) = manager.get(&zerocr_key) {
@@ -1546,7 +1479,7 @@ pub async fn clay_macroquad_render<'a, CustomElementData: 'a>(
                                 Asset::Path(path) => {
                                     match load_file(path).await {
                                         Ok(tvg_bytes) => {
-                                            let texture = if let Some(tvg_texture) = render_tinyvg_texture(&tvg_bytes, bb.width, bb.height, &state.clip) {
+                                            let texture = if let Some(tvg_texture) = render_tinyvg_texture(&tvg_bytes, bb.width, bb.height, &state.clip_stack.last().copied()) {
                                                 tvg_texture
                                             } else {
                                                 warn!("Failed to load TinyVG image: {}", path);
@@ -1561,7 +1494,7 @@ pub async fn clay_macroquad_render<'a, CustomElementData: 'a>(
                                     }
                                 }
                                 Asset::Bytes { file_name, data: tvg_bytes } => {
-                                    let texture = if let Some(tvg_texture) = render_tinyvg_texture(&tvg_bytes, bb.width, bb.height, &state.clip) {
+                                    let texture = if let Some(tvg_texture) = render_tinyvg_texture(&tvg_bytes, bb.width, bb.height, &state.clip_stack.last().copied()) {
                                         tvg_texture
                                     } else {
                                         warn!("Failed to load TinyVG image: {}", file_name);
@@ -1574,7 +1507,7 @@ pub async fn clay_macroquad_render<'a, CustomElementData: 'a>(
                         
                         manager.get_or_create(key, || {
                             let mut tvg_image: Image = base_texture.get_texture_data();
-                            let rounded_rect: Image = rounded_rectangle_texture(cr, &bb, &state.clip).get_texture_data();
+                            let rounded_rect: Image = rounded_rectangle_texture(cr, &bb, &state.clip_stack.last().copied()).get_texture_data();
                             
                             for i in 0..tvg_image.bytes.len()/4 {
                                 let this_alpha = tvg_image.bytes[i * 4 + 3] as f32 / 255.0;
@@ -1637,12 +1570,12 @@ pub async fn clay_macroquad_render<'a, CustomElementData: 'a>(
                         cr.top_right,
                         cr.bottom_left,
                         cr.bottom_right,
-                        state.clip
+                        state.clip_stack.last().copied()
                     );
 
                     let texture = manager.get_or_create(key, || {
-                        let mut resized_image: Image = resize(&source_texture, bb.height, bb.width, &state.clip).get_texture_data();
-                        let rounded_rect: Image = rounded_rectangle_texture(cr, &bb, &state.clip).get_texture_data();
+                        let mut resized_image: Image = resize(&source_texture, bb.height, bb.width, &state.clip_stack.last().copied()).get_texture_data();
+                        let rounded_rect: Image = rounded_rectangle_texture(cr, &bb, &state.clip_stack.last().copied()).get_texture_data();
 
                         for i in 0..resized_image.bytes.len()/4 {
                             let this_alpha = resized_image.bytes[i * 4 + 3] as f32 / 255.0;
@@ -1669,124 +1602,7 @@ pub async fn clay_macroquad_render<'a, CustomElementData: 'a>(
                 let bb = command.bounding_box;
                 let color = clay_to_macroquad_color(&config.color);
                 let cr = &config.corner_radii;
-
-                if cr.top_left == 0.0 && cr.top_right == 0.0 && cr.bottom_left == 0.0 && cr.bottom_right == 0.0 {
-                    draw_rectangle(
-                        bb.x,
-                        bb.y,
-                        bb.width,
-                        bb.height,
-                        color
-                    );
-                } else if color.a == 1.0 {
-                    // Edges
-                    // Top edge
-                    if cr.top_left > 0.0 || cr.top_right > 0.0 {
-                        draw_rectangle(
-                            bb.x + cr.top_left,
-                            bb.y,
-                            bb.width - cr.top_left - cr.top_right,
-                            bb.height - cr.bottom_left.max(cr.bottom_right),
-                            color
-                        );
-                    }
-                    // Left edge
-                    if cr.top_left > 0.0 || cr.bottom_left > 0.0 {
-                        draw_rectangle(
-                            bb.x,
-                            bb.y + cr.top_left,
-                            bb.width - cr.top_right.max(cr.bottom_right),
-                            bb.height - cr.top_left - cr.bottom_left,
-                            color
-                        );
-                    }
-                    // Bottom edge
-                    if cr.bottom_left > 0.0 || cr.bottom_right > 0.0 {
-                        draw_rectangle(
-                            bb.x + cr.bottom_left,
-                            bb.y + cr.top_left.max(cr.top_right),
-                            bb.width - cr.bottom_left - cr.bottom_right,
-                            bb.height - cr.top_left.max(cr.top_right),
-                            color
-                        );
-                    }
-                    // Right edge
-                    if cr.top_right > 0.0 || cr.bottom_right > 0.0 {
-                        draw_rectangle(
-                            bb.x + cr.top_left.max(cr.bottom_left),
-                            bb.y + cr.top_right,
-                            bb.width - cr.top_left.max(cr.bottom_left),
-                            bb.height - cr.top_right - cr.bottom_right,
-                            color
-                        );
-                    }
-
-                    // Corners
-                    // Top-left corner
-                    if cr.top_left > 0.0 {
-                        draw_good_circle(
-                            bb.x + cr.top_left,
-                            bb.y + cr.top_left,
-                            cr.top_left,
-                            color,
-                        );
-                    }
-                    // Top-right corner
-                    if cr.top_right > 0.0 {
-                        draw_good_circle(
-                            bb.x + bb.width - cr.top_right,
-                            bb.y + cr.top_right,
-                            cr.top_right,
-                            color,
-                        );
-                    }
-                    // Bottom-left corner
-                    if cr.bottom_left > 0.0 {
-                        draw_good_circle(
-                            bb.x + cr.bottom_left,
-                            bb.y + bb.height - cr.bottom_left,
-                            cr.bottom_left,
-                            color,
-                        );
-                    }
-                    // Bottom-right corner
-                    if cr.bottom_right > 0.0 {
-                        draw_good_circle(
-                            bb.x + bb.width - cr.bottom_right,
-                            bb.y + bb.height - cr.bottom_right,
-                            cr.bottom_right,
-                            color,
-                        );
-                    }
-                } else {
-                    let mut manager = TEXTURE_MANAGER.lock().unwrap();
-                    let key = format!(
-                        "rect:{}:{}:{}:{}:{}:{}:{:?}",
-                        bb.width,
-                        bb.height,
-                        cr.top_left,
-                        cr.top_right,
-                        cr.bottom_left,
-                        cr.bottom_right,
-                        state.clip
-                    );
-
-                    let texture = manager.get_or_create(key, || {
-                        rounded_rectangle_texture(cr, &bb, &state.clip)
-                    });
-
-                    draw_texture_ex(
-                        texture,
-                        bb.x,
-                        bb.y,
-                        color,
-                        DrawTextureParams {
-                            dest_size: Some(Vec2::new(bb.width, bb.height)),
-                            flip_y: true,
-                            ..Default::default()
-                        },
-                    );
-                }
+                draw_good_rounded_rectangle(bb.x, bb.y, bb.width, bb.height, cr, color);
             }
             _ => render_common_command(&command, fonts, &handle_custom_command, &mut state),
         }
