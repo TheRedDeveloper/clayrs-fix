@@ -257,7 +257,7 @@ impl<'render, 'clay: 'render, ImageElementData: 'render, CustomElementData: 'ren
 
     pub fn on_hover<F, T>(&self, callback: F, user_data: T)
     where
-        F: Fn(Id, Clay_PointerData, &mut T) + 'static
+        F: Fn(Id, Clay_PointerData, &mut T) + 'static,
     {
         let boxed = Box::new((callback, user_data));
         let user_data_ptr = Box::into_raw(boxed) as *mut core::ffi::c_void;
@@ -266,8 +266,7 @@ impl<'render, 'clay: 'render, ImageElementData: 'render, CustomElementData: 'ren
             element_id: Clay_ElementId,
             pointer_data: Clay_PointerData,
             user_data: *mut core::ffi::c_void,
-        )
-        where
+        ) where
             F: Fn(Id, Clay_PointerData, &mut T) + 'static,
         {
             let (callback, data) = &mut *(user_data as *mut (F, T));
@@ -276,10 +275,7 @@ impl<'render, 'clay: 'render, ImageElementData: 'render, CustomElementData: 'ren
         }
 
         unsafe {
-            Clay_OnHover(
-                Some(trampoline::<F, T>),
-                user_data_ptr,
-            );
+            Clay_OnHover(Some(trampoline::<F, T>), user_data_ptr);
         }
     }
 
